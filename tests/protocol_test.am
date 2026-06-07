@@ -1,0 +1,41 @@
+// Test stdlib : builders de frames Socket.IO (purs, sans socket).
+namespace Tests
+
+import Amalgame.Net.SocketIO
+
+public class Program {
+    public static void Main(string[] args) {
+        var pass: int = 0
+        var fail: int = 0
+
+        let open: string = SioProtocol.OpenPacket("abc", 25000, 20000)
+        if (open == "0{\"sid\":\"abc\",\"upgrades\":[],\"pingInterval\":25000,\"pingTimeout\":20000,\"maxPayload\":1000000}") {
+            Console.WriteLine("[PASS] OpenPacket")
+            pass = pass + 1
+        } else {
+            Console.WriteLine("[FAIL] OpenPacket: " + open)
+            fail = fail + 1
+        }
+
+        let conn: string = SioProtocol.ConnectPacket("abc")
+        if (conn == "40{\"sid\":\"abc\"}") {
+            Console.WriteLine("[PASS] ConnectPacket")
+            pass = pass + 1
+        } else {
+            Console.WriteLine("[FAIL] ConnectPacket: " + conn)
+            fail = fail + 1
+        }
+
+        let ev: string = SioProtocol.EventFrame("ranking:update", "{\"a\":1}")
+        if (ev == "42[\"ranking:update\",{\"a\":1}]") {
+            Console.WriteLine("[PASS] EventFrame")
+            pass = pass + 1
+        } else {
+            Console.WriteLine("[FAIL] EventFrame: " + ev)
+            fail = fail + 1
+        }
+
+        Console.WriteLine("")
+        Console.WriteLine("Résultat : " + String.FromInt(pass) + " PASS, " + String.FromInt(fail) + " FAIL")
+    }
+}

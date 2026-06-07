@@ -1,0 +1,105 @@
+namespace Amalgame.Net.SocketIO
+
+import Amalgame.Net.Http
+import Amalgame.Threading
+
+// Builders de frames Engine.IO v4 / Socket.IO v5 (pures, testables).
+public class SioProtocol {
+
+    // Engine.IO OPEN : 0{"sid":...,"upgrades":[],...}. upgrades vide car on
+    // est déjà en WebSocket (jamais de ré-upgrade).
+    public static string OpenPacket(string sid, int pingInterval, int pingTimeout) {
+        return "0{\"sid\":\"" + sid + "\",\"upgrades\":[],\"pingInterval\":"
+            + String.FromInt(pingInterval) + ",\"pingTimeout\":"
+            + String.FromInt(pingTimeout) + ",\"maxPayload\":1000000}"
+    }
+
+    // Socket.IO CONNECT au namespace par défaut : 40{"sid":...}.
+    public static string ConnectPacket(string sid) {
+        return "40{\"sid\":\"" + sid + "\"}"
+    }
+
+    // Engine.IO MESSAGE (4) + Socket.IO EVENT (2) : 42["<event>",<jsonPayload>].
+    public static string EventFrame(string event, string jsonPayload) {
+        return "42[\"" + event + "\"," + jsonPayload + "]"
+    }
+}
+
+// Serveur Socket.IO minimal, WebSocket-only. Registre de connexions gardé
+// par mutex (Emit est appelé depuis un thread différent de l'accept loop).
+public class SocketIO {
+
+    public Mu:           AmalgameMutex
+    public Conns:        List<AmalgameWsConn>
+    public NextSid:      int
+    public PingInterval: int
+    public PingTimeout:  int
+
+    public SocketIO() {
+        this.Mu = Threading.MutexNew()
+        this.Conns = new List<AmalgameWsConn>()
+        this.NextSid = 1
+        this.PingInterval = 25000
+        this.PingTimeout = 20000
+    }
+
+    public static SocketIO New() { return new SocketIO() }
+
+    public SocketIO WithPingInterval(int ms) { this.PingInterval = ms return this }
+    public SocketIO WithPingTimeout(int ms) { this.PingTimeout = ms return this }
+
+    // Boucle d'une connexion (un thread par conn via Ws.ServeMt).
+    public int HandleConn(AmalgameWsConn conn) {
+        Threading.MutexLock(this.Mu)
+        let sid: string = "s" + String.FromInt(this.NextSid)
+        this.NextSid = this.NextSid + 1
+        this.Conns.Add(conn)
+        Threading.MutexUnlock(this.Mu)
+
+        WsConn.SendText(conn, SioProtocol.OpenPacket(sid, this.PingInterval, this.PingTimeout))
+        WsConn.SendText(conn, SioProtocol.ConnectPacket(sid))
+
+        while (!WsConn.IsClosed(conn)) {
+            let msg: string = WsConn.ReceiveText(conn)
+            if (String.Length(msg) == 0) { return 0 }
+            if (msg == "2") { WsConn.SendText(conn, "3") }
+        }
+        return 0
+    }
+
+    // Broadcast `42["<event>",<jsonPayload>]` à toutes les conns vivantes.
+    // Reconstruit le registre en éliminant les conns fermées. Renvoie le
+    // nombre de clients atteints. jsonPayload DOIT être un JSON valide.
+    public int Emit(string event, string jsonPayload) {
+        let frame: string = SioProtocol.EventFrame(event, jsonPayload)
+        Threading.MutexLock(this.Mu)
+        let alive: List<AmalgameWsConn> = new List<AmalgameWsConn>()
+        var sent: int = 0
+        for i in 0..this.Conns.Count() {
+            let c: AmalgameWsConn = this.Conns.Get(i)
+            if (!WsConn.IsClosed(c)) {
+                if (WsConn.SendText(c, frame)) {
+                    sent = sent + 1
+                    alive.Add(c)
+                }
+            }
+        }
+        this.Conns = alive
+        Threading.MutexUnlock(this.Mu)
+        return sent
+    }
+
+    // Serveur WS bloquant (à lancer sur un thread dédié).
+    public int Serve(int port) {
+        let sio: SocketIO = this
+        let handler = conn => sio.HandleConn(conn)
+        Ws.ServeMt(port, handler)
+        return 0
+    }
+
+    // Lance Serve(port) sur un thread de fond, retourne immédiatement.
+    public void ServeBackground(int port) {
+        let sio: SocketIO = this
+        Threading.ThreadSpawn(arg => sio.Serve(port), 0)
+    }
+}

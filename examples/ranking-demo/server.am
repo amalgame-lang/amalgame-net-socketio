@@ -1,0 +1,25 @@
+// Démo : émet un event "tick" toutes les secondes à tous les clients.
+//
+//   amc build server.am && ./server
+//   node test-client.js     (socket.io-client@4, transports:['websocket'])
+namespace App
+
+import Amalgame.Net.SocketIO
+import Amalgame.DateTime
+
+public class Program {
+    public static void Main(string[] args) {
+        let io: SocketIO = SocketIO.New()
+        io.ServeBackground(3001)
+        Console.WriteLine("Socket.IO démo sur :3001 — connecte un socket.io-client")
+
+        var n: int = 0
+        while (true) {
+            let payload: string = "{\"tick\":" + String.FromInt(n) + "}"
+            let sent: int = io.Emit("tick", payload)
+            Console.WriteLine("emit tick " + String.FromInt(n) + " → " + String.FromInt(sent) + " client(s)")
+            n = n + 1
+            DateTime.SleepMillis(1000)
+        }
+    }
+}
